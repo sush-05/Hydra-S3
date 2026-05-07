@@ -428,7 +428,7 @@ Neural Acceleration
 
 # Author
 
-**[Your Name]**
+**Susmita Das**
 
 ### Field
 Embedded Infrastructure & Edge-AI
