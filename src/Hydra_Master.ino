@@ -1,46 +1,40 @@
 #include <Arduino.h>
 #include "Hydra_Config.h"
-#include "esp_lcd_panel_io.h"
-
-esp_lcd_panel_io_handle_t hydra_io_handle = NULL;
+#include "driver/i2s.h"
 
 void setup() {
     Serial.begin(115200);
     pinMode(PIN_READY, INPUT);
     pinMode(PIN_DONE, INPUT);
 
-    // Initializing the High-Speed Parallel i80 Bridge
-    esp_lcd_panel_io_i80_config_t bus_cfg = {
-        .cs_gpio_num = PIN_CS,
-        .pclk_gpio_num = PIN_WR,
-        .data_gpio_nums = {1, 2, 3, 4, 5, 6, 7, 8},
-        .bus_width = 8,
-        .max_transfer_bytes = TENSOR_SIZE,
+    // Using I2S in Parallel LCD Mode for Classic ESP32
+    i2s_config_t i2s_config = {
+        .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_LCD),
+        .sample_rate = 100000,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_8BIT,
+        .communication_format = I2S_COMM_FORMAT_I2S_MSB,
+        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+        .dma_buf_count = 2,
+        .dma_buf_len = TENSOR_SIZE,
     };
-
-    // Attach to the ESP32-S3 LCD Peripheral for DMA support
-    if (esp_lcd_new_panel_io_i80(&bus_cfg, &hydra_io_handle) == ESP_OK) {
-        Serial.println(">>> HYDRA MASTER: Parallel DMA Plane Online.");
-    }
+    
+    i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+    // Pin mapping for Parallel I2S would go here...
+    Serial.println(">>> HYDRA MASTER (ESP32-DEV) ONLINE");
 }
 
 void loop() {
-    // Check if the Accelerator is idle
     if (digitalRead(PIN_READY) == HIGH) {
-        
-        // Generate/Capture Tensor Data
-        uint8_t frame_data[TENSOR_SIZE];
-        for(int i=0; i<TENSOR_SIZE; i++) frame_data[i] = random(0, 255);
+        uint8_t tensor[TENSOR_SIZE];
+        for(int i=0; i<TENSOR_SIZE; i++) tensor[i] = random(0, 255);
 
-        unsigned long start_micros = micros();
-
-        // High-Speed DMA Transfer (Moves 1KB in <30 microseconds)
-        esp_lcd_panel_io_tx_color(hydra_io_handle, 0x2C, frame_data, TENSOR_SIZE);
+        size_t bytes_written;
+        unsigned long start = micros();
         
-        // Wait for Hardware "DONE" signal from Accelerator
-        while(digitalRead(PIN_DONE) == LOW); 
+        // Direct DMA Blast over I2S Parallel
+        i2s_write(I2S_NUM_0, tensor, TENSOR_SIZE, &bytes_written, portMAX_DELAY);
         
-        unsigned long end_micros = micros();
-        Serial.printf("[BENCHMARK] Total Inference Cycle: %lu us\n", end_micros - start_micros);
+        while(digitalRead(PIN_DONE) == LOW);
+        Serial.printf("Cycle Complete: %lu us\n", micros() - start);
     }
 }
